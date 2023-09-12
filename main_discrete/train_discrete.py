@@ -14,7 +14,9 @@ import math
 
 import pandas as pd
 import numpy as np
-import tensorflow as tf
+#import tensorflow as tf
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
 import hierarchy_discrete_alg as alg_discrete
 from tqdm import tqdm
 import logging
@@ -54,6 +56,8 @@ FM_context_list.extend(['FM_context' + str(i) for i in range(setting.hidden_fact
 next_FM_context_list = ['next_FM_' + str(i) for i in range(setting.hidden_factor)]
 next_FM_context_list.extend(['next_FM_context' + str(i) for i in range(setting.hidden_factor)])
 
+
+tf.compat.v1.disable_eager_execution()
 
 
 intervals = (
@@ -266,6 +270,7 @@ def train_function(df, use_FM, train_FM):
     np.random.seed(seed)
     random.seed(seed)
     tf.set_random_seed(seed)
+    #tf.random.set_seed(seed)
 
     summarize = False
 
@@ -285,7 +290,9 @@ def train_function(df, use_FM, train_FM):
 # ############## pre-train master agent #####################
 
     if (train_FM>0):
+
         config_proto = tf.ConfigProto()
+        #config_proto = tf.compat.v1.ConfigProto()
         config_proto.gpu_options.allow_growth = True
         sess = tf.Session(config=config_proto)
 
@@ -297,9 +304,9 @@ def train_function(df, use_FM, train_FM):
         pre_master_loss = pre_train_master_RL(RL_master, data, first_run=True)
         # save model
         saver = tf.compat.v1.train.Saver()
-        saver.save(sess, 'models/pretrain/duel_DQN')
-        new_saver = tf.compat.v1.train.import_meta_graph('models/pretrain/duel_DQN.meta')
-        new_saver.restore(sess, 'models/pretrain/duel_DQN')
+        saver.save(sess, './models/pretrain/duel_DQN')
+        new_saver = tf.compat.v1.train.import_meta_graph('./models/pretrain/duel_DQN.meta')
+        new_saver.restore(sess, './models/pretrain/duel_DQN')
     # #########################################################################    
 
         # get embedding features from pre-train model
@@ -553,7 +560,7 @@ def train_function(df, use_FM, train_FM):
     master_loss = train_master_RL(RL_master, combined_data, use_FM, first_run=True)
     # save model
     saver = tf.compat.v1.train.Saver()
-    saver.save(sess, 'models/master/duel_DQN')
+    saver.save(sess, './models/master/duel_DQN')
 
 #     evaluate master agent
     if (use_FM>0):

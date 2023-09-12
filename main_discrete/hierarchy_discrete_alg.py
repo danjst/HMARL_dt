@@ -2,7 +2,9 @@
 
 import numpy as np
 # import tensorflow as tf
-import tensorflow as tf
+#import tensorflow as tf
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
 import setting
 import hierarchy_discrete_networks as networks
 import sys
@@ -11,6 +13,7 @@ import sys
 
 np.random.seed(setting.SEED)
 tf.set_random_seed(setting.SEED)
+#tf.random.set_seed(setting.SEED)
 action_level = setting.action_level
 
 class DuelingDQN:
