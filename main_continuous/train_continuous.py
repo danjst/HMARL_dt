@@ -11,7 +11,9 @@ import time
 import math
 import pandas as pd
 import numpy as np
-import tensorflow as tf
+#import tensorflow as tf
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
 import embedding_alg as alg_qmix
 from tqdm import tqdm
 import logging
@@ -270,7 +272,7 @@ def train_mixer(RL, data, use_FM, first_run=True, writer = None, epoch = 1):
     loss = RL.cost_his
     return loss
 
-def train_function(use_FM, train_FM):
+def train_function(df, use_FM, train_FM):
     
     start_time = time.time()
     
@@ -285,6 +287,9 @@ def train_function(use_FM, train_FM):
     l_action = 2   
     N_agent = 2
     master_action_num = setting.master_action_num
+
+    data = df[df['train_test']=="train"] # daniel   
+    data =data.reset_index(drop = True) #daniel
 
     if use_FM>0:
         input_dim = 2*setting.hidden_factor
@@ -623,5 +628,9 @@ if __name__ == "__main__":
     parser.add_argument('--use_FM', '-e', type=float, required=True)
     parser.add_argument('--retrain_FM', '-train_FM', type=float, required=True)
     args = parser.parse_args()  
-        
-    train_function(args.use_FM, args.retrain_FM)        
+
+    df = pd.read_csv('../data/data_rl_4h_train_test_split_3steps.csv')  #daniel
+    df.fillna(0, inplace=True) #daniel
+    df['master_action'] = df.apply(lambda x: compute_master_action(x['iv_fluids_quantile'], x['vasopressors_quantile']), axis=1) #daniel
+
+    train_function(df,args.use_FM, args.retrain_FM)        
