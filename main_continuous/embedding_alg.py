@@ -1,7 +1,9 @@
 """Implementation of CONTINUOUS HMARL."""
 
 import numpy as np
-import tensorflow as tf
+#import tensorflow as tf
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
 import embedding_networks as networks
 import sys
 import setting
@@ -73,20 +75,44 @@ class DuelingDQN:
         
         def build_layers(s, c_names, n_l1, w_initializer, b_initializer):
             
-
-            
+            #print("STATE STUFF")
+            #print(s)
+            #print("WEIGHTS")
+            #print(self.weights) # this is y in paper
             with tf.variable_scope('FM_s'):
-                temp = tf.tensordot(s, self.weights, axes = 0)
-                b = tf.shape(temp)[1]
-                eye = tf.eye(b, dtype=temp.dtype)
-                inp_masked = temp * tf.expand_dims(eye, 2)
+                temp = tf.tensordot(s, self.weights, axes = 0) # (48,48,8) 
+                #print("TEMP")
+                #print(temp)
+                b = tf.shape(temp)[1] # 48
+                sess = tf.Session()
+                #print ("B")
+                #print(b)
+                eye = tf.eye(b, dtype=temp.dtype) # (48,48) diagonal matrix
+                #print("Eye")
+                #print(eye)
+                inp_masked = temp * tf.expand_dims(eye, 2) #tensor product multiplication (48,48,8) * (48,48,1) = (48,48,8) 
+                # broadcasting see integrate_previous_steps.ipynb where I test this out
+                #print("inp_masked")
+                #print(inp_masked)
                 nonzero_embeddings = tf.tensordot(inp_masked, tf.ones(b, temp.dtype), [[2], [0]]) # None * l_state * K
+                #print("nonzero embeddings")
+                #print(nonzero_embeddings)
 
                 summed_features_emb = tf.reduce_sum(nonzero_embeddings, 1) # None * K
+                #print("summed_features_emb = tf.reduce_sum(nonzero_embeddings, 1) ")
+                #print(summed_features_emb)
                 summed_features_emb_square = tf.square(summed_features_emb)  # None * K
+                #print("summed_features_emb_square = tf.square(summed_features_emb) ")
+                #print(summed_features_emb_square)
                 squared_features_emb = tf.square(nonzero_embeddings)
+                #print("squared_features_emb = tf.square(nonzero_embeddings) ")
+                #print(squared_features_emb)
                 squared_sum_features_emb = tf.reduce_sum(squared_features_emb, 1)  # None * K
+                #print("squared_sum_features_emb = tf.reduce_sum(squared_features_emb, 1) ")
+                #print(squared_sum_features_emb)
                 FM = 0.5 * tf.subtract(summed_features_emb_square, squared_sum_features_emb)  # None * K
+                #print("FM = 0.5 * tf.subtract(summed_features_emb_square, squared_sum_features_emb) ")
+                #print(FM)
 
                 Em_State = tf.add(FM, summed_features_emb) # None * K
 
@@ -140,7 +166,7 @@ class DuelingDQN:
         with tf.variable_scope('train'):
             self._train_op = tf.compat.v1.train.RMSPropOptimizer(self.lr).minimize(self.loss)
 
-        # ------------------ build target_net ------------------
+        # ------------------ build target_net (next states) ------------------
         self.s_ = tf.compat.v1.placeholder(tf.float32, [None, self.n_features], name='s_')    # input
         with tf.variable_scope('target_net'):
             c_names = ['target_net_params', tf.GraphKeys.GLOBAL_VARIABLES]
@@ -153,24 +179,7 @@ class DuelingDQN:
     def store_transition(self, memory_array):
         self.memory = memory_array
 
-    def choose_action(self, observation):
-        observation = observation[np.newaxis, :]
-        if np.random.uniform() < self.epsilon:  # choosing action
-            actions_value = self.sess.run(self.q_eval, feed_dict={self.s: observation})
-            action = np.argmax(actions_value)
-        else:
-            action = np.random.randint(0, self.n_actions)
-        return action
-    def choose_low_level_Q(self, master_action, Q_no, Q_iv, Q_vasso, Q_mix):
-        if master_action == 0:
-            Q_return = Q_no
-        elif master_action == 1:
-            Q_return = Q_iv
-        elif master_action == 2:
-            Q_return=Q_vasso
-        else:
-            Q_return = Q_mix
-        return Q_return
+
     def learn(self, i, pretrain = True):
         if self.learn_step_counter % self.replace_target_iter == 0:
             self.sess.run(self.replace_target_op)
@@ -186,19 +195,20 @@ class DuelingDQN:
         
         q_next = self.sess.run(self.q_next, feed_dict={self.s_: next_states, self.done: done_vec}) # next observation
         
-
-
         q_target = q_eval.copy()
 
-
+    # for dqn, we sample (state, action, new_state, reward, done) from environment
+     #   q_eval = eval_net(state)[action] # 1 value
+      #  q _target = max(eval_net(new_state)) # 1 value
+    
         batch_index = np.arange(self.batch_size, dtype=np.int32)
-        eval_act_index = batch_memory[:, self.n_features].astype(int)
+        eval_act_index = batch_memory[:, self.n_features].astype(int) # master action (index 48)
         reward = batch_memory[:, self.n_features + 1]
 
-        q_target[batch_index, eval_act_index] = reward + self.gamma * np.max(q_next, axis=1)
- 
-        
-
+        # Q-TARGET (max(qnext)) - Q_EVAL (all 4 actions, but ends up only the q-eval action index will be used) 
+        q_target[batch_index, eval_act_index] = reward + self.gamma * np.max(q_next, axis=1) # only change the value in the index of the q_eval action,
+        # so when you subtract q_eval - q_target, everything will be 0 except that index (since q_target is a q_eval.copy())
+        # conclusion: for q_eval we use physician's action Qvalue, for q_target we use the max q_next from target net. 
         _, self.cost = self.sess.run([self._train_op, self.loss],
                                      feed_dict={self.s: states,
                                                 self.q_target: q_target})
@@ -217,7 +227,8 @@ class DuelingDQN:
 
 
 
-
+#############################################################################################################################################
+#############################################################################################################################################
 
             
 class Single_AC(object):
@@ -260,6 +271,7 @@ class Single_AC(object):
         self.create_networks()
         self.list_initialize_target_ops, self.list_update_target_ops = self.get_assign_target_ops()
         self.create_train_op()
+        print('initialized')
         self.cost_his = []
         self.replace_target_iter = setting.replace_target_iter
         if sess is None:
@@ -311,7 +323,6 @@ class Single_AC(object):
         return list_initial_ops, list_update_ops     
     
 
-
     def create_train_op(self):
         """Ops for training AC policy."""
         
@@ -324,35 +335,15 @@ class Single_AC(object):
         self.V_evaluated = tf.compat.v1.placeholder(tf.float32, [None], 'V_evaluated')
 
         self.policy_term1 = tf.multiply(self.log_probs, self.V_td_target)
+
         self.policy_loss = -tf.reduce_mean(self.policy_term1 - self.V_evaluated)
         self.policy_opt = tf.compat.v1.train.RMSPropOptimizer(self.lr_actor)
         self.policy_op = self.policy_opt.minimize(self.policy_loss)
-        
-
-
-    def process_actions(self, n_steps, actions):
-        """
-        actions must have shape [time, n_agents],
-        and values are action indices
-        """
-        # Each row of actions is one time step,
-        # row contains action indices for all agents
-        # Convert to [time, agents, l_action]
-        # so each agent gets its own 1-hot row vector
-        actions_1hot = np.zeros([n_steps, self.n_agents, self.l_action], dtype=int)
-        grid = np.indices((n_steps, self.n_agents))
-        actions_1hot[grid[0], grid[1], actions] = 1
-
-        # In-place reshape of actions to [time*n_agents, l_action]
-        actions_1hot.shape = (n_steps*self.n_agents, self.l_action)
-
-        return actions_1hot
 
     
     def store_transition(self, memory_array):
         self.memory = memory_array
         
-
         
     def create_summary(self):
 
@@ -394,61 +385,13 @@ class Single_AC(object):
         # convert to batch
         obs = np.array(list_obs)
         feed = {self.obs : obs}
-        actions_selected = sess.run(self.actions_selected, feed_dict=feed)
+        actions_selected,l_probs = sess.run([self.actions_selected,self.log_probs], feed_dict=feed)
+        #print("l_probs")
+        #print(l_probs)
         actions = actions_selected.reshape((-1, self.n_agents))
 
         return actions
-    def run_phys_Q(self, sess, list_state=None, list_obs=None, a_0=None, a_1=None):
-        """Get qmix value for the physician's action
-        
-        Args:
-            list_obs: list of vectors, one per agent
-            sess: TF session
 
-        Returns: np.array of phys qmix values
-        """
-        # convert to batch
-        state = np.array(list_state)
-        obs = np.array(list_obs)
-        a_0 = np.array(a_0).reshape((-1,1))
-        a_1 = np.array(a_1).reshape((-1,1))
-        
-        actions = np.concatenate((a_0, a_1), axis = 1)
-        actions = actions.astype(int)
-        n_steps = actions.shape[0]
-
-        actions_1hot = self.process_actions(n_steps, actions)
-        feed = {self.state : state,
-                self.actions_1hot : actions_1hot,
-                self.obs : obs}
-        phys_Qmix = sess.run(self.mixer, feed_dict=feed)
-        return phys_Qmix
-    def run_RL_Q(self, sess, list_state=None, list_obs=None, a_0=None, a_1=None):
-        """Get qmix value for the physician's action
-        
-        Args:
-            list_obs: list of vectors, one per agent
-            sess: TF session
-
-        Returns: np.array of phys qmix values
-        """
-        # convert to batch
-        state = np.array(list_state)
-        obs = np.array(list_obs)
-        a_0 = np.array(a_0).reshape((-1,1))
-        a_1 = np.array(a_1).reshape((-1,1))
-        
-        actions = np.concatenate((a_0, a_1), axis = 1)
-        actions = actions.astype(int)
-        n_steps = actions.shape[0]
-
-        actions_1hot = self.process_actions(n_steps, actions)
-        feed = {self.state : state,
-                self.actions_1hot : actions_1hot,
-                self.obs : obs}
-        RL_Qmix = sess.run(self.mixer, feed_dict=feed)
-        return RL_Qmix
-    
 
 
     def train_step_single_AC(self, i, use_FM, writer=None, iv_action_only = True):
@@ -457,7 +400,7 @@ class Single_AC(object):
 
         sample_index = np.random.choice(self.memory_size, size=self.batch_size)
         batch_memory = self.memory[sample_index, :]
-        actions = batch_memory[:, 2*self.l_state] # None * 1
+        actions = batch_memory[:, 2*self.l_state] # None * 1 #because memory is [current_state,next_state,action]
         action_reshaped = actions.reshape((-1,1))
         reward = batch_memory[:, 2*self.l_state + 1] #None * 1
         rewards = np.squeeze(reward.reshape((-1,1))) #None * 1
@@ -474,36 +417,46 @@ class Single_AC(object):
             obs = obs.reshape((-1,self.l_state)) # None * l_state
             obs_next = batch_memory[:, self.l_state:2*self.l_state] #l_state:2*l_state
             obs_next = obs_next.reshape((-1,self.l_state))
-
-
-
         
         # Train critic
-        feed = {self.obs : obs_next, self.actions : action_reshaped}
+        # possibly wrong here, we're not supposed to use action_reshaped (physician action of current state),
+        # we have to use a' from the current policy (actor) via: batch_a_, log_pi_ = self.actor(batch_s_) 
+
+        ''' Q(s',a') '''
+        feed = {self.obs : obs_next, self.actions : action_reshaped} # last obs_next state for a patient is all 0
         V_target_res, V_next_res = self.sess.run([self.V_target, self.V], feed_dict=feed)
+        # V_target_res is q-value from target network, V_next_res is q-value from eval network, but both are using "obs_next"
         V_target_res = np.squeeze(V_target_res)
         V_next_res = np.squeeze(V_next_res)
         done_multiplier = np.squeeze(done_vec)
+
+        '''  [r + y * Q(s', a')] '''
         V_td_target = rewards + self.gamma * V_target_res * done_multiplier
 
+        '''   [r + y * Q(s',a')] - Q(s,a)     '''
         feed = {self.V_td_target : V_td_target,
                 self.obs : obs, 
                 self.actions : action_reshaped}
-
-        _, V_res,self.cost = self.sess.run([self.V_op, self.V,self.loss_V], feed_dict=feed)
+        # get current state,action q val. Then calculate loss with V_td_target
+        _, V_res,self.cost = self.sess.run([self.V_op, self.V,self.loss_V], feed_dict=feed) #self.V is the q value of current_state, current_action
         self.cost_his.append(self.cost)
         wandb.log({"single agent Q_loss": self.cost})
         
          
         # Train actor
-        V_res = np.squeeze(V_res)
+        V_res = np.squeeze(V_res) # V res is the current state,action q val
+        #print("V_res")
+        #print(V_res)
         V_td_target = rewards + self.gamma * V_next_res * done_multiplier
         
         feed = {self.obs : obs,
-                self.actions : action_reshaped,
+                #self.actions : action_reshaped,
                 self.V_td_target : V_td_target,
                 self.V_evaluated : V_res}
-        
+        # V_td_target - V_res
+        pol_term = self.sess.run([self.policy_term1], feed_dict=feed)
+        #print("POL TERM")
+        #print(pol_term)
         _, l_policy = self.sess.run([self.policy_op, self.policy_loss], feed_dict=feed)
         wandb.log({"policy_loss": l_policy}) 
 
@@ -560,6 +513,13 @@ class Single_AC(object):
                 self.obs : obs}
         RL_Q = sess.run(self.V, feed_dict=feed)
         return RL_Q
+
+
+
+
+#######################################################################################################################################################################################################
+############################################################################################################################################################################################
+
 
     
 class Qmix(object):
@@ -724,33 +684,6 @@ class Qmix(object):
         self.mixer_op = self.mixer_opt.minimize(self.loss_mixer)
 
 
-    def process_actions(self, n_steps, actions):
-        """
-        actions must have shape [time, n_agents],
-        and values are action indices
-        """
-        # Each row of actions is one time step,
-        # row contains action indices for all agents
-        # Convert to [time, agents, l_action]
-        # so each agent gets its own 1-hot row vector
-        actions_1hot = np.zeros([n_steps, self.n_agents, self.l_action], dtype=int)
-        grid = np.indices((n_steps, self.n_agents))
-        actions_1hot[grid[0], grid[1], actions] = 1
-
-        # In-place reshape of actions to [time*n_agents, l_action]
-        actions_1hot.shape = (n_steps*self.n_agents, self.l_action)
-
-        return actions_1hot
-
-
-    def choose_action(self, observation):
-        observation = observation[np.newaxis, :]
-        if np.random.uniform() < self.epsilon:  # choosing action
-            actions_value = self.sess.run(self.q_eval, feed_dict={self.s: observation})
-            action = np.argmax(actions_value)
-        else:
-            action = np.random.randint(0, self.l_action)
-        return action
     
     def store_transition(self, memory_array):
         self.memory = memory_array
@@ -828,57 +761,6 @@ class Qmix(object):
         vaso_actions = actions2.reshape((-1,1))        
         return iv_actions, vaso_actions
     
-    def run_phys_Q(self, sess, list_state=None, list_obs=None, a_0=None, a_1=None):
-        """Get qmix value for the physician's action
-        
-        Args:
-            list_obs: list of vectors, one per agent
-            sess: TF session
-
-        Returns: np.array of phys qmix values
-        """
-        # convert to batch
-        state = np.array(list_state)
-        obs = np.array(list_obs)
-        a_0 = np.array(a_0).reshape((-1,1))
-        a_1 = np.array(a_1).reshape((-1,1))
-        
-        actions = np.concatenate((a_0, a_1), axis = 1)
-        actions = actions.astype(int)
-        n_steps = actions.shape[0]
-
-        actions_1hot = self.process_actions(n_steps, actions)
-        feed = {self.state : state,
-                self.actions_1hot : actions_1hot,
-                self.obs : obs}
-        phys_Qmix = sess.run(self.mixer, feed_dict=feed)
-        return phys_Qmix
-    def run_RL_Q(self, sess, list_state=None, list_obs=None, a_0=None, a_1=None):
-        """Get qmix value for the physician's action
-        
-        Args:
-            list_obs: list of vectors, one per agent
-            sess: TF session
-
-        Returns: np.array of phys qmix values
-        """
-        # convert to batch
-        state = np.array(list_state)
-        obs = np.array(list_obs)
-        a_0 = np.array(a_0).reshape((-1,1))
-        a_1 = np.array(a_1).reshape((-1,1))
-        
-        actions = np.concatenate((a_0, a_1), axis = 1)
-        actions = actions.astype(int)
-        n_steps = actions.shape[0]
-
-        actions_1hot = self.process_actions(n_steps, actions)
-        feed = {self.state : state,
-                self.actions_1hot : actions_1hot,
-                self.obs : obs}
-        RL_Qmix = sess.run(self.mixer, feed_dict=feed)
-        return RL_Qmix
-    
 
 
     def train_step(self, i, use_FM,  writer=None):
@@ -906,6 +788,7 @@ class Qmix(object):
         if (use_FM>0):
             state =np.array( batch_memory[:,-4*self.hidden_factor:-2*self.hidden_factor]).reshape((-1,2*self.hidden_factor)) #-4K: -2K
             obs = np.stack((state, state)).reshape((-1,2*self.hidden_factor)) # 2None * 2K
+            #print("obs_shape{}".format(obs.shape))
             state_next = np.array(batch_memory[:,-2*self.hidden_factor:]).reshape((-1,2*self.hidden_factor)) # -2K:
             obs_next = np.stack((state_next, state_next)).reshape((-1,2*self.hidden_factor)) #2None * 2K
 
@@ -918,9 +801,13 @@ class Qmix(object):
 
 
         # Train critic
+        # critic is a DQN : takes in state, action (continuous value) and outputs q val
+        # to train critic, minimize your loss (next_state_q_val + r) - current_state_q_val. 
+
         feed = {self.obs : obs_next, self.actions : action_reshaped,
                 self.single_actions : ai_single_actions_reshaped}
         V_target_res, V_next_res = self.sess.run([self.V_target, self.V], feed_dict=feed)
+        #print("V_target_res{}".format(V_target_res.shape))
         V_target_res = np.squeeze(V_target_res)
         V_next_res = np.squeeze(V_next_res)
         
@@ -947,13 +834,15 @@ class Qmix(object):
                 self.actions : action_reshaped, self.V_td_target : V_td_target,
                 self.V_evaluated : V_res,
                 self.single_actions : ai_single_actions_reshaped}
+
         
-        action_selected1, action_selected2 = self.sess.run([self.actions_selected1, self.actions_selected2], feed_dict=feed)
+        #action_selected1, action_selected2 = self.sess.run([self.actions_selected1, self.actions_selected2], feed_dict=feed)
 #         _ = self.sess.run([self.policy_op], feed_dict=feed)
         _, l_policy1 = self.sess.run([self.policy_op1, self.policy_loss1], feed_dict=feed)
         wandb.log({"policy1_loss": l_policy1}) 
         _, l_policy2 = self.sess.run([self.policy_op2, self.policy_loss2], feed_dict=feed)
-        wandb.log({"policy2_loss": l_policy2})         
+        wandb.log({"policy2_loss": l_policy2})     
+        action_selected1, action_selected2 = self.sess.run([self.actions_selected1, self.actions_selected2], feed_dict=feed)    
 
 
         # Get Q_tot target value
@@ -1052,7 +941,13 @@ class Qmix(object):
         RL_Qmix = sess.run(self.mixer, feed_dict=feed)
         return RL_Qmix
     
-    
+
+
+
+
+###########################################################################################################################################################################################################################################
+###########################################################################################################################################################################################################################################
+
     
 class MasterDQN:
     def __init__(
@@ -1174,24 +1069,6 @@ class MasterDQN:
     def store_transition(self, memory_array):
         self.memory = memory_array
 
-    def choose_action(self, observation):
-        observation = observation[np.newaxis, :]
-        if np.random.uniform() < self.epsilon:  # choosing action
-            actions_value = self.sess.run(self.q_eval, feed_dict={self.s: observation})
-            action = np.argmax(actions_value)
-        else:
-            action = np.random.randint(0, self.n_actions)
-        return action
-    def choose_low_level_Q(self, master_action, Q_no, Q_iv, Q_vasso, Q_mix):
-        if master_action == 0:
-            Q_return = Q_no
-        elif master_action == 1:
-            Q_return = Q_iv
-        elif master_action == 2:
-            Q_return=Q_vasso
-        else:
-            Q_return = Q_mix
-        return Q_return
     def learn(self, i, use_FM, pretrain = True):
         if self.learn_step_counter % self.replace_target_iter == 0:
             self.sess.run(self.replace_target_op)
@@ -1209,23 +1086,16 @@ class MasterDQN:
         done_vec = np.tile((1-batch_memory[:, 2*self.n_features + 2]).reshape(-1, 1), self.n_actions)       
         if (use_FM>0):
             states = np.array(batch_memory[:,-4*self.hidden_factor:-2*self.hidden_factor]).reshape((-1,2*self.hidden_factor)) #-4K: -2K            
-            next_states = np.array(batch_memory[:,-2*self.hidden_factor:-self.hidden_factor]).reshape((-1,self.hidden_factor)) # -2K:-K
+            next_states = np.array(batch_memory[:,-4*self.hidden_factor:-2*self.hidden_factor]).reshape((-1,2*self.hidden_factor)) # -2K:-K
            
         else:
             states = np.array(batch_memory[:,:self.n_features]).reshape((-1, self.n_features)) # 0 : l_state
             next_states = np.array(batch_memory[:, self.n_features:2*self.n_features]).reshape((-1, self.n_features)) #l_state:2*l_state
            
-
-
-        
         q_next = self.sess.run(self.q_next, feed_dict={self.s_: next_states, self.done: done_vec}) # next observation
         q_eval = self.sess.run(self.q_eval, feed_dict={self.s: states})
 
-
         q_target = q_eval.copy()
-
-
-
 
         q_target[batch_index, eval_act_index] = reward + self.gamma * np.max(q_next, axis=1)
  
@@ -1246,3 +1116,7 @@ class MasterDQN:
 #             merged_summary = tf.compat.v1.summary.merge_all() 
 #             sum_summary = self.sess.run(merged_summary, feed_dict={self.s_: next_states, self.s: states, self.q_target: q_target})
 #             self.writer.add_summary(sum_summary, i)    
+
+
+
+
