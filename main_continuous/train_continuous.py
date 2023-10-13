@@ -20,6 +20,7 @@ import logging
 import argparse
 import setting
 from embedding_evaluation_graphs import *
+import embedding_networks as networks
 
 
 state_col = setting.state_col
@@ -107,11 +108,11 @@ def pre_train_master_RL(RL, data, first_run=True):
     if first_run:
          # reward function
         data['reward'] = data.apply(eval('setting.' + REWARD_FUN) , axis = 1)        
-        memory_array = np.concatenate([np.array(data[state_col]), 
-                            np.array(data['master_action']).reshape(-1, 1),
-                            np.array(data['reward']).reshape(-1, 1), 
-                            np.array(data['done']).reshape(-1, 1),
-                            np.array(data[next_state_col])],
+        memory_array = np.concatenate([np.array(data[state_col]),  # index 0:47
+                            np.array(data['master_action']).reshape(-1, 1), # index 48, master action made in "__main__"
+                            np.array(data['reward']).reshape(-1, 1), # index 49, rewards created from 3 line above
+                            np.array(data['done']).reshape(-1, 1), # index 50, done column already created in data.csv
+                            np.array(data[next_state_col])], #index 51:98
                             axis = 1)
         np.save('../data/continuous/pretrain_master_memory.npy', memory_array)
         
@@ -240,15 +241,15 @@ def train_mixer(RL, data, use_FM, first_run=True, writer = None, epoch = 1):
     if first_run:
          # reward function
         data['reward'] = data.apply(eval('setting.' + REWARD_FUN) , axis = 1)  
-        memory_array = np.concatenate([np.array(data[state_col]),
-                                       np.array(data[next_state_col]),
-                                       np.array(data[action_con_col]), 
-                                       np.array(data[ai_action_con_col]),
-                                       np.array(data['reward']).reshape(-1, 1), 
-                                       np.array(data['done']).reshape(-1, 1),
-                                       np.array(data[FM_context_list]),
-                                       np.array(data[next_FM_context_list])],axis = 1)
-        np.save('../data/continuous/hierarchy_discrete_memory.npy', memory_array)
+        memory_array = np.concatenate([np.array(data[state_col]), # 48
+                                       np.array(data[next_state_col]), # 48
+                                       np.array(data[action_con_col]),  # 2
+                                       np.array(data[ai_action_con_col]), # 2
+                                       np.array(data['reward']).reshape(-1, 1),  #1
+                                       np.array(data['done']).reshape(-1, 1), # 1
+                                       np.array(data[FM_context_list]), # 16 FM(size=8) + FM_context(size=8)
+                                       np.array(data[next_FM_context_list])],axis = 1) # 16 FM + FM context
+        np.save('../data/continuous/hierarchy_discrete_memory.npy', memory_array) 
         
     else:
         
@@ -314,7 +315,7 @@ def train_function(df, use_FM, train_FM):
         new_saver = tf.compat.v1.train.import_meta_graph('models/pretrain/duel_DQN.meta')
         new_saver.restore(sess, 'models/pretrain/duel_DQN')
     # #########################################################################    
-
+    # embedding creator RL_master model has already been trained fully starting at this point
         # evaluate model
         eval_batch_size = int(20000)
         index_num_0 = int(0)
@@ -336,14 +337,14 @@ def train_function(df, use_FM, train_FM):
             next_state_embedding = np.array(next_state_embedding).reshape(-1,hidden_factor)
             context_embedding = np.array(context_embedding).reshape(-1,hidden_factor)
             next_context_embedding = np.array(next_context_embedding).reshape(-1, hidden_factor)
-            Q_no = eval_q[:,0].reshape(-1,1)
-
-  
+            Q_no = eval_q[:,0].reshape(-1,1) # [:,0] corresponds to the q-value of 0th action (no-action), 1 is iv, 2 is vaso, 3 is mix 
 
             model_result = np.concatenate([state_embedding,context_embedding, next_state_embedding, next_context_embedding,Q_no], axis=1)
  
             model_result = pd.DataFrame(model_result, columns =list(eval_result.columns))
-            eval_result = eval_result.append(model_result, ignore_index=True)
+            #model_result.to_csv('../data/model_result.csv', index = False)
+            #eval_result.to_csv('../data/eval_result.csv', index = False)
+            eval_result = pd.concat([eval_result, model_result], ignore_index=True)
             index_num_0 = index_num_1
             index_num_1 = index_num_1 +eval_batch_size
         print(index_num_0)
@@ -360,10 +361,10 @@ def train_function(df, use_FM, train_FM):
         next_state_embedding = np.array(next_state_embedding).reshape(-1,hidden_factor)
         context_embedding = np.array(context_embedding).reshape(-1,hidden_factor)
         next_context_embedding = np.array(next_context_embedding).reshape(-1, hidden_factor)
-        Q_no = eval_q[:,0].reshape(-1,1)    
+        Q_no = eval_q[:,0].reshape(-1,1)  # [:,0] corresponds to the q-value of 0th action (no-action), 1 is iv, 2 is vaso, 3 is mix 
         model_result = np.concatenate([state_embedding,context_embedding, next_state_embedding, next_context_embedding,Q_no], axis=1)
         model_result = pd.DataFrame(model_result, columns =list(eval_result.columns))
-        eval_result = eval_result.append(model_result, ignore_index=True)
+        eval_result = pd.concat([eval_result, model_result], ignore_index=True)
 
         result_array = np.concatenate([df.values, eval_result.values], axis=1)
         result = pd.DataFrame(result_array, 
@@ -382,10 +383,21 @@ def train_function(df, use_FM, train_FM):
         df['master_action'] = df.apply(lambda x: compute_master_action(x['iv_fluids_quantile'], x['vasopressors_quantile']), axis=1)
 
         df['Q_phys_no_action'] = df['Q_phys_no_action'].apply(lambda x: -Q_threshold if x<-Q_threshold else x if x<Q_threshold else Q_threshold)
+
+
+
+
+
+
+
+
+
       
  ################### single_AC network for IV only ################### 
     IV_only_data = df[(df['master_action']==1) & (df['train_test']=="train")]
     IV_only_data = IV_only_data.reset_index(drop=True)
+
+    #IV_only_data.to_csv('../data/iv_only_data.csv',index=False)
     
     tf.reset_default_graph()
     alg = alg_qmix.Single_AC(1, l_state, hidden_factor, input_dim, l_action, nn, 4e-4, 2e-4, memory_size=len(IV_only_data), batch_size=BATCH_SIZE, e_greedy_increment=0.001) 
@@ -415,9 +427,9 @@ def train_function(df, use_FM, train_FM):
 
 
     
-    # evaluate single IV model
+    # evaluate single IV model (WHOLE DATASET including all master_action = 1,2,3,4)
     if (use_FM>0):
-        eval_state = np.array(df[FM_context_list])
+        eval_state = np.array(df[FM_context_list]) # now using whole DF instead of IV-active only rows, so now including rows where IV value is 0
         eval_obs = np.array(eval_state).reshape((-1,2*setting.hidden_factor))
     else:
         eval_state = np.array(df[state_col])
@@ -425,16 +437,19 @@ def train_function(df, use_FM, train_FM):
 
     
     
-    actions_int = alg.run_actor(eval_obs, sess)
-    a_0 = df[action_con_col[0]]
-    phys_qmix = alg.run_phys_Q_continuous(sess, list_state=eval_state, list_obs = eval_obs, a_0=a_0)
-    ai_qmix = alg.run_RL_Q_continuous(sess, list_state=eval_state, list_obs = eval_obs, a_0=actions_int[:,0])
+    actions_int = alg.run_actor(eval_obs, sess) # ai actions
+    a_0 = df[action_con_col[0]]   # physician actions
+    phys_qmix = alg.run_phys_Q_continuous(sess, list_state=eval_state, list_obs = eval_obs, a_0=a_0) # get q value physician actions (1 value which is for IV continuous)
+    ai_qmix = alg.run_RL_Q_continuous(sess, list_state=eval_state, list_obs = eval_obs, a_0=actions_int[:,0]) # get q value for ai model actions (1 value which is for IV continuous)
     
     result_array = np.concatenate([df.values, actions_int, phys_qmix,ai_qmix], axis=1)
     result = pd.DataFrame(result_array, 
                           columns=list(df.columns)+['ai_action_IV_only','Q_phys_IV_only','Q_ai_IV_only'])
     print("result")
     print(result.head(1))
+
+    #result.to_csv('../data/iv_results.csv',index=False)
+
 ################### single_AC network for Vasso only ################### 
 
     df = result.copy()
@@ -467,7 +482,7 @@ def train_function(df, use_FM, train_FM):
         i = i+1     
     
     
-    # evaluate single IV model
+    # evaluate single vaso model
     
     if (use_FM>0):
         eval_state = np.array(df[FM_context_list])
@@ -490,7 +505,11 @@ def train_function(df, use_FM, train_FM):
 
     print("result")
     print(result.head(1))
+
+    #result.to_csv('../data/vaso_results.csv',index=False)
+
 # ################################ Qmix network ###############################
+
     df = result.copy()
     mixer_data = df[(df['master_action']==3) & (df['train_test']=="train")]
     mixer_data = mixer_data.reset_index(drop = True)
@@ -544,6 +563,8 @@ def train_function(df, use_FM, train_FM):
         result.to_csv(res_dir, encoding = 'gb18030')
     else:
         result.to_csv('../data/con_Qmix_result_NoFM.csv', encoding = 'gb18030')
+
+
 ################### Master Agent to decide no_action, IV_only, Vasso_only, or Qmix ###################
     tf.reset_default_graph()
     df = result.copy()
@@ -629,7 +650,9 @@ if __name__ == "__main__":
     parser.add_argument('--retrain_FM', '-train_FM', type=float, required=True)
     args = parser.parse_args()  
 
-    df = pd.read_csv('../data/data_rl_4h_train_test_split_3steps.csv')  #daniel
+    #df = pd.read_csv('../data/data_rl_4h_train_test_split_3steps.csv')  #daniel
+    df = pd.read_csv('../data/context.csv')  #daniel
+
     df.fillna(0, inplace=True) #daniel
     df['master_action'] = df.apply(lambda x: compute_master_action(x['iv_fluids_quantile'], x['vasopressors_quantile']), axis=1) #daniel
 
