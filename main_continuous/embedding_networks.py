@@ -1,7 +1,8 @@
 import numpy as np
-import tensorflow as tf
+#import tensorflow as tf
 import tensorflow_probability as tfp
-
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
 
 
 def get_variable(name, shape):
@@ -10,7 +11,7 @@ def get_variable(name, shape):
                            tf.initializers.truncated_normal(0,0.01))
 
 
-def actor(obs, n_h1, n_h2, n_actions):
+def actor(obs, n_h1, n_h2, n_actions): # n_actions = 1 because this is a single continuous value
     """
     Args:
         obs: TF placeholder
@@ -42,6 +43,16 @@ def actor(obs, n_h1, n_h2, n_actions):
 
 
 def critic_mixer(obs, actions, single_agent_actions,n_h1, n_h2):
+    # all shapes are when using FM >0
+# find Q(s,a) for each vaso and iv where a is both the physician action and AI single model (iv only, vaso only) chosen action, 
+# input = [[hidden8, phys_iv, ai_iv],
+#         [hidden8, phys_vaso, ai_vaso]
+#          .................256 later (batch size 128)
+#          [hidden8, phys_iv,ai_iv],
+#         [hidden8, phys_vaso, ai_vaso]]
+#   ]
+# output = [[iv_qval],
+#           [vaso_qval]]
 
     """
     Args:
@@ -51,12 +62,15 @@ def critic_mixer(obs, actions, single_agent_actions,n_h1, n_h2):
         n_h2: int
     """
 
-    state_action = tf.concat([obs, tf.cast(actions, dtype=tf.float32)], axis=1)
-    state_action_single = tf.concat([state_action, tf.cast(single_agent_actions, dtype=tf.float32)], axis=1)
-    h1 = tf.layers.dense(inputs=state_action_single, units=n_h1, activation=tf.nn.relu6, use_bias=True, name='V_h1')
-    h2 = tf.layers.dense(inputs=h1, units=n_h2, activation=tf.nn.relu6, use_bias=True, name='V_h2')
-    q = tf.layers.dense(inputs=h2, units=1, activation=None, use_bias=True, name='V_out')
-
+    state_action = tf.concat([obs, tf.cast(actions, dtype=tf.float32)], axis=1) #  256 x (16+1)
+    state_action_single = tf.concat([state_action, tf.cast(single_agent_actions, dtype=tf.float32)], axis=1) # 256 x (17+1) 
+    #print("state_action_single: ")
+    #print(state_action_single)
+    h1 = tf.layers.dense(inputs=state_action_single, units=n_h1, activation=tf.nn.relu6, use_bias=True, name='V_h1') # output: 256 x 32, layer is 18 x 32
+    h2 = tf.layers.dense(inputs=h1, units=n_h2, activation=tf.nn.relu6, use_bias=True, name='V_h2') # output: 256 x 32, layer is 32 x 32
+    q = tf.layers.dense(inputs=h2, units=1, activation=None, use_bias=True, name='V_out') # output = 256 x 1
+    #print("Q VAL HERE")
+    #print(q)
     return q
 
 def critic(obs, actions,n_h1, n_h2):

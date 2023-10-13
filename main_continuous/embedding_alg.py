@@ -388,6 +388,8 @@ class Single_AC(object):
         actions_selected,l_probs = sess.run([self.actions_selected,self.log_probs], feed_dict=feed)
         #print("l_probs")
         #print(l_probs)
+        #print("ACTIONS HERE")
+        #print(actions_selected)
         actions = actions_selected.reshape((-1, self.n_agents))
 
         return actions
@@ -454,7 +456,7 @@ class Single_AC(object):
                 self.V_td_target : V_td_target,
                 self.V_evaluated : V_res}
         # V_td_target - V_res
-        pol_term = self.sess.run([self.policy_term1], feed_dict=feed)
+        #pol_term = self.sess.run([self.policy_term1], feed_dict=feed)
         #print("POL TERM")
         #print(pol_term)
         _, l_policy = self.sess.run([self.policy_op, self.policy_loss], feed_dict=feed)
@@ -854,7 +856,8 @@ class Qmix(object):
         feed = {self.state : state_next,
                 self.actions : action_selected,
                 self.obs : obs_next,
-                self.single_actions : ai_single_actions_reshaped}
+                self.single_actions : ai_single_actions_reshaped
+                }
 
 
         Q_tot_target = self.sess.run(self.mixer_target, feed_dict=feed)
